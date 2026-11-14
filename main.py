@@ -5,11 +5,12 @@ Mini NPU Simulator (미션 3)
 파이썬 표준 라이브러리(json, time)만을 활용하여 다음을 구현합니다.
 
 1. 동적 N×N 행렬 구조 (크기 하드코딩 금지: 3×3, 5×5, 13×13, 25×25 모두 동일 로직 처리)
-2. 모드 1: 사용자 입력 모드 (3×3 필터 2개 + 입력 패턴 검증 및 오류 시 재입력)
+2. 모드 1: 사용자 입력 모드 (3×3 필터 A, B + 패턴, 저장 확인, 연산 시간(ms), A/B/판정 불가 판정)
 3. 라벨 정규화 함수 분리 ('+' / 'cross' -> 'Cross', 'x' -> 'X')
 4. 반복문 기반 MAC(Multiply-Accumulate) 연산 직접 구현 (out += a * b)
 5. 부동소수점 허용오차(epsilon = 1e-9) 기반 비교 및 동점(UNDECIDED) 판정
-6. 모드 2: data.json 일괄 판정 모드 (케이스 단위 예외 처리로 중단 방지 및 3갈래 실패 진단)
+6. 모드 2: data.json 일괄 판정 모드 (filters.size_N / patterns.size_{N}_{idx} 공식 형식 지원,
+   케이스 단위 예외 처리로 중단 방지, 3갈래 실패 진단, 성능 분석 후 결과 요약·실패 목록 출력)
 7. 성능 분석: 입출력(I/O) 시간을 제외한 순수 MAC 연산만 크기별 10회 반복 측정(ms) 및 O(N²) 확인
 """
 
@@ -32,6 +33,9 @@ DEFAULT_DATA_FILE = "data.json"
 
 # 모드 2 출력에서 크기 열(예: '25×25')의 최소 표시 너비
 SIZE_LABEL_WIDTH = 5
+
+# 'patterns'의 키(size_{N}_{idx})에서 추출한 N을 케이스에 보관할 때 쓰는 내부 키
+SIZE_HINT_KEY = "_size_from_key"
 
 
 # ---------------------------------------------------------------------------
@@ -243,17 +247,23 @@ def classify_pattern(
     """
     score_cross = compute_mac(pattern_matrix, cross_filter)
     score_x = compute_mac(pattern_matrix, x_filter)
-
-    # 부동소수점 정밀도 오차를 고려하여 두 점수 차이의 절댓값이 epsilon 미만이면 동점 처리
-    diff = abs(score_cross - score_x)
-    if diff < epsilon:
-        predicted = "UNDECIDED"
-    elif score_cross > score_x:
-        predicted = "Cross"
-    else:
-        predicted = "X"
-
+    predicted, diff = decide_by_scores(score_cross, score_x, ("Cross", "X", "UNDECIDED"), epsilon)
     return predicted, score_cross, score_x, diff
+
+
+def decide_by_scores(
+    score_a: float, score_b: float, labels: tuple[str, str, str], epsilon: float = EPSILON
+) -> tuple[str, float]:
+    """
+    두 점수를 epsilon 기반 정책으로 비교해 (판정 라벨, 점수 차이 절댓값)을 반환합니다.
+    labels는 (A가 클 때 라벨, B가 클 때 라벨, 동점 라벨) 순서입니다.
+    부동소수점 오차를 고려해 '==' 대신 abs(a - b) < epsilon 이면 동점으로 처리합니다.
+    """
+    label_a, label_b, tie_label = labels
+    diff = abs(score_a - score_b)
+    if diff < epsilon:
+        return tie_label, diff
+    return (label_a if score_a > score_b else label_b), diff
 
 
 # ---------------------------------------------------------------------------
@@ -280,17 +290,15 @@ def read_matrix_from_user(title: str, size: int = 3) -> list[list[float]]:
 
                 # 쉼표를 공백으로 치환해 공백/쉼표 혼합 입력도 깔끔하게 분리
                 tokens = raw_line.replace(",", " ").split()
+                format_hint = f"입력 형식 오류: 각 줄에 {size}개의 숫자를 공백으로 구분해 입력하세요."
                 if len(tokens) != size:
-                    print(
-                        f"  [입력 오류] 열 개수가 일치하지 않습니다 "
-                        f"(기대: {size}개, 입력: {len(tokens)}개). {r + 1}행을 다시 입력해 주세요."
-                    )
+                    print(f"  {format_hint} (입력된 숫자 {len(tokens)}개) {r + 1}행을 다시 입력해 주세요.")
                     continue
 
                 try:
                     parsed_row = [parse_finite_float(tok) for tok in tokens]
                 except DataSchemaError as exc:
-                    print(f"  [입력 오류] {exc} {r + 1}행을 다시 입력해 주세요.")
+                    print(f"  {format_hint} ({exc}) {r + 1}행을 다시 입력해 주세요.")
                     continue
 
                 rows.append(parsed_row)
@@ -307,28 +315,47 @@ def read_matrix_from_user(title: str, size: int = 3) -> list[list[float]]:
             return validated
 
 
+def print_stored_matrix(title: str, matrix: list[list[float]]) -> None:
+    """저장된 행렬을 화면에 다시 보여 주어 입력이 올바르게 저장되었는지 확인시킵니다."""
+    print(f"  [저장 완료] {title}:")
+    for row in matrix:
+        print("    " + " ".join(f"{value:g}" for value in row))
+
+
 def run_interactive_mode(default_size: int = 3) -> None:
     """
     모드 1 실행 함수:
-    기본 3×3 크기의 Cross 필터, X 필터, 입력 패턴을 사용자로부터 받아 MAC 연산으로 판별합니다.
+    필터 A, B 입력 → 저장 확인 → 패턴 입력 → MAC 연산 → 판정 → 성능 분석(3×3) 순서로 실행합니다.
+    판정은 점수가 큰 필터(A 또는 B)이며, epsilon 기준 동점이면 '판정 불가'입니다.
     """
     print("\n" + "=" * 60)
-    print(f"모드 1: 사용자 입력 모드 ({default_size}×{default_size} 필터 2개 + 패턴)")
+    print(f"모드 1: 사용자 입력 모드 ({default_size}×{default_size} 필터 A, B + 패턴)")
     print("=" * 60)
 
-    cross_filter = read_matrix_from_user("필터 1 (Cross 필터)", size=default_size)
-    x_filter = read_matrix_from_user("필터 2 (X 필터)", size=default_size)
+    filter_a = read_matrix_from_user("필터 A", size=default_size)
+    filter_b = read_matrix_from_user("필터 B", size=default_size)
+    print("\n--- 필터 저장 확인 ---")
+    print_stored_matrix("필터 A", filter_a)
+    print_stored_matrix("필터 B", filter_b)
+
     pattern = read_matrix_from_user("판별 대상 패턴", size=default_size)
 
-    predicted, score_cross, score_x, diff = classify_pattern(
-        pattern, cross_filter, x_filter, epsilon=EPSILON
-    )
+    # 연산 시간 측정 구간: 두 필터에 대한 MAC 연산만 포함 (입력/출력 제외)
+    start_t = time.perf_counter()
+    score_a = compute_mac(pattern, filter_a)
+    score_b = compute_mac(pattern, filter_b)
+    elapsed_ms = (time.perf_counter() - start_t) * 1000.0
+
+    verdict, diff = decide_by_scores(score_a, score_b, ("A", "B", "판정 불가"))
 
     print("\n--- 판별 결과 ---")
-    print(f"Cross 필터 MAC 점수 : {score_cross:.12g}")
-    print(f"X     필터 MAC 점수 : {score_x:.12g}")
-    print(f"점수 차이 (|Δ|)     : {diff:.12g} (기준 epsilon = {EPSILON})")
-    print(f"최종 판별 결과      : {predicted}")
+    print(f"필터 A MAC 점수 : {score_a:.12g}")
+    print(f"필터 B MAC 점수 : {score_b:.12g}")
+    print(f"점수 차이 (|Δ|) : {diff:.12g} (기준 epsilon = {EPSILON})")
+    print(f"연산 시간       : {elapsed_ms:.6f} ms (MAC 2회)")
+    print(f"판정 결과       : {verdict}")
+
+    print_performance_report(benchmark_mac_performance(sizes=(default_size,)))
 
 
 # ---------------------------------------------------------------------------
@@ -409,6 +436,56 @@ def extract_filters_from_mapping(raw_filters, context_name: str) -> dict[str, li
     return extracted
 
 
+def parse_size_from_key(key) -> int | None:
+    """
+    'size_{N}' 또는 'size_{N}_{idx}' 형태의 키에서 N을 추출합니다. 형식이 다르면 None을 반환합니다.
+    (표준 라이브러리 json, time 외 모듈 사용 제한으로 정규식 대신 문자열 분리로 처리)
+    """
+    if not isinstance(key, str):
+        return None
+    parts = key.strip().lower().split("_")
+    if len(parts) >= 2 and parts[0] == "size" and parts[1].isdigit():
+        return int(parts[1])
+    return None
+
+
+def select_global_filters(global_filters, size_n: int) -> dict[str, list[list[float]]]:
+    """
+    전역 filters에서 크기 N에 해당하는 Cross/X 필터를 선택합니다.
+    지원 형식: {"size_5": {...}} (미션 공식 형식), {"5": {...}}, 크기 구분 없는 단일 {"cross": ..., "x": ...}
+    """
+    if not isinstance(global_filters, dict):
+        return extract_filters_from_mapping(global_filters, "전역 필터")
+
+    for size_key in (f"size_{size_n}", str(size_n)):
+        if size_key in global_filters:
+            return extract_filters_from_mapping(global_filters[size_key], f"전역 필터({size_key})")
+
+    sized_keys = [k for k in global_filters if parse_size_from_key(k) is not None or str(k).isdigit()]
+    if sized_keys:
+        raise DataSchemaError(
+            f"크기 {size_n}×{size_n}에 해당하는 전역 필터(size_{size_n})가 없습니다 "
+            f"(사용 가능: {', '.join(str(k) for k in sized_keys)})."
+        )
+    return extract_filters_from_mapping(global_filters, "전역 필터")
+
+
+def select_case_filters(case_item: dict, global_filters, case_id: str, size_n: int) -> dict:
+    """케이스 내부 필터(filters/filter/filter_cross+filter_x)를 우선 사용하고, 없으면 전역 필터에서 선택합니다."""
+    if "filters" in case_item:
+        return extract_filters_from_mapping(case_item["filters"], f"케이스({case_id})")
+    if "filter" in case_item:
+        return extract_filters_from_mapping(case_item["filter"], f"케이스({case_id})")
+    if "filter_cross" in case_item and "filter_x" in case_item:
+        return {
+            "Cross": validate_square_matrix(case_item["filter_cross"], name="filter_cross"),
+            "X": validate_square_matrix(case_item["filter_x"], name="filter_x"),
+        }
+    if global_filters is not None:
+        return select_global_filters(global_filters, size_n)
+    raise DataSchemaError("케이스 또는 전역 설정에 비교용 필터 2개('filters'/'filter')가 없습니다.")
+
+
 def resolve_case_components(
     case_item, global_filters
 ) -> tuple[str, list[list[float]], list[list[float]], list[list[float]], str, dict | None]:
@@ -422,11 +499,7 @@ def resolve_case_components(
     case_id = str(get_first_present(case_item, ("id", "name"), default="이름없음"))
 
     # 1. 입력 패턴 행렬 추출 (일반적인 키 이름 지원)
-    raw_pattern = None
-    for key in ("input", "pattern", "matrix", "data"):
-        if key in case_item:
-            raw_pattern = case_item[key]
-            break
+    raw_pattern = get_first_present(case_item, ("input", "pattern", "matrix", "data"))
     if raw_pattern is None:
         raise DataSchemaError("입력 패턴 필드('input', 'pattern', 'matrix' 중 하나)가 누락되었습니다.")
 
@@ -434,39 +507,16 @@ def resolve_case_components(
     pattern_size = len(pattern_matrix)
 
     # 2. 기대 라벨 추출 및 정규화 함수 호출
-    raw_expected = None
-    for key in ("expected", "label", "answer", "target"):
-        if key in case_item:
-            raw_expected = case_item[key]
-            break
+    raw_expected = get_first_present(case_item, ("expected", "label", "answer", "target"))
     if raw_expected is None:
         raise DataSchemaError("기대 정답 필드('expected', 'label', 'answer' 중 하나)가 누락되었습니다.")
 
     expected_label = normalize_label(raw_expected)
 
-    # 3. 필터 2개 추출 (케이스 내부 filter/filters 우선, 없으면 전역 filters에서 크기 매칭)
-    filters_dict = None
-    if "filters" in case_item:
-        filters_dict = extract_filters_from_mapping(case_item["filters"], f"케이스({case_id})")
-    elif "filter" in case_item:
-        filters_dict = extract_filters_from_mapping(case_item["filter"], f"케이스({case_id})")
-    elif "filter_cross" in case_item and "filter_x" in case_item:
-        filters_dict = {
-            "Cross": validate_square_matrix(case_item["filter_cross"], name="filter_cross"),
-            "X": validate_square_matrix(case_item["filter_x"], name="filter_x"),
-        }
-    elif global_filters is not None:
-        # 전역 filters가 크기별 매핑({"5": {"cross": ..., "x": ...}}) 또는 단일 매핑({"cross": ..., "x": ...})인지 확인
-        size_key = str(pattern_size)
-        if isinstance(global_filters, dict) and size_key in global_filters:
-            filters_dict = extract_filters_from_mapping(
-                global_filters[size_key], f"전역 필터({size_key}×{size_key})"
-            )
-        else:
-            filters_dict = extract_filters_from_mapping(global_filters, "전역 필터")
-
-    if filters_dict is None:
-        raise DataSchemaError("케이스 또는 전역 설정에 비교용 필터 2개('filters'/'filter')가 없습니다.")
+    # 3. 필터 2개 선택: 케이스 키(size_{N}_{idx})에서 추출한 N이 있으면 그 N 기준, 없으면 패턴 크기 기준
+    size_hint = case_item.get(SIZE_HINT_KEY)
+    filter_size = size_hint if size_hint is not None else pattern_size
+    filters_dict = select_case_filters(case_item, global_filters, case_id, filter_size)
 
     cross_filter = filters_dict["Cross"]
     x_filter = filters_dict["X"]
@@ -541,6 +591,7 @@ def new_batch_summary() -> dict:
             NumericalComparisonError.category: 0,
         },
         "measured_sizes": set(),
+        "failures": [],
     }
 
 
@@ -555,10 +606,31 @@ def parse_batch_root(raw_root) -> tuple[list, object]:
         raise DataSchemaError("JSON 최상위 구조는 리스트 또는 객체여야 합니다.")
 
     global_filters = get_first_present(raw_root, ("filters", "filter"))
-    cases = get_first_present(raw_root, ("cases", "test_cases", "tests", "data"))
+    cases = get_first_present(raw_root, ("patterns", "cases", "test_cases", "tests", "data"))
+    if isinstance(cases, dict):
+        cases = patterns_mapping_to_cases(cases)
     if not isinstance(cases, list):
-        raise DataSchemaError("JSON 루트 객체에 테스트 케이스 리스트('cases')가 없습니다.")
+        raise DataSchemaError(
+            "JSON 루트 객체에 테스트 케이스('patterns' 객체 또는 'cases' 리스트)가 없습니다."
+        )
     return cases, global_filters
+
+
+def patterns_mapping_to_cases(patterns: dict) -> list[dict]:
+    """
+    미션 공식 형식 {"size_5_1": {"input": ..., "expected": ...}, ...}을 케이스 리스트로 변환합니다.
+    키는 케이스 이름(id)이 되고, 키에서 추출한 N은 필터 선택용 힌트(SIZE_HINT_KEY)로 함께 저장합니다.
+    원본 딕셔너리는 수정하지 않고 새 딕셔너리를 만듭니다.
+    """
+    cases: list[dict] = []
+    for key, value in patterns.items():
+        body = value if isinstance(value, dict) else {}
+        case = {**body, "id": key}
+        size_n = parse_size_from_key(key)
+        if size_n is not None:
+            case[SIZE_HINT_KEY] = size_n
+        cases.append(case)
+    return cases
 
 
 def build_display_ids(cases: list) -> list[str]:
@@ -587,6 +659,7 @@ def evaluate_and_report_case(
         summary["errors_by_category"][exc.category] = (
             summary["errors_by_category"].get(exc.category, 0) + 1
         )
+        summary["failures"].append((display_id, exc.category, str(exc)))
         print(f"[{idx:02d}] {pad_display(display_id, id_width)} | FAIL | [{exc.category}] {exc}")
         return
 
@@ -610,6 +683,9 @@ def print_batch_summary(summary: dict) -> None:
         print("실패 원인 분류:")
         for cat_name, count in summary["errors_by_category"].items():
             print(f"  - {cat_name}: {count}건")
+        print("실패 케이스 목록:")
+        for case_name, category, reason in summary["failures"]:
+            print(f"  - {case_name}: [{category}] {reason}")
 
 
 def run_batch_mode(file_path: str = DEFAULT_DATA_FILE) -> dict:
@@ -647,6 +723,8 @@ def run_batch_mode(file_path: str = DEFAULT_DATA_FILE) -> dict:
             idx, case_item, global_filters, display_ids[idx - 1], id_width, summary
         )
 
+    # 미션 실행 흐름: PASS/FAIL 출력 → 성능 분석(3×3 포함 전 크기) → 결과 요약
+    print_performance_report(benchmark_mac_performance())
     print_batch_summary(summary)
     return summary
 
