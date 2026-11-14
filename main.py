@@ -121,6 +121,19 @@ def pad_display(text, width: int) -> str:
     return text + " " * max(width - display_width(text), 0)
 
 
+def get_first_present(mapping: dict, keys: tuple[str, ...], default=None):
+    """
+    keys 순서대로 mapping에 실제로 존재하는 첫 번째 키의 값을 반환합니다.
+    'a.get(k1) or a.get(k2)' 방식은 빈 리스트·0·빈 문자열을 '키 없음'으로 오인하므로,
+    값의 참/거짓이 아니라 키 존재 여부로 판단합니다. 단, JSON null(None)은 없는 것으로 봅니다.
+    """
+    for key in keys:
+        value = mapping.get(key)
+        if value is not None:
+            return value
+    return default
+
+
 def normalize_label(label) -> str:
     """
     패턴 및 필터 라벨을 표준 형식으로 정규화하는 전용 함수입니다.
@@ -368,8 +381,8 @@ def extract_filters_from_mapping(raw_filters, context_name: str) -> dict[str, li
                 raise DataSchemaError(
                     f"{context_name}: 필터 리스트의 {idx + 1}번째 항목이 객체가 아닙니다."
                 )
-            raw_label = item.get("label") or item.get("name") or item.get("type")
-            raw_matrix = item.get("matrix") or item.get("weights") or item.get("filter")
+            raw_label = get_first_present(item, ("label", "name", "type"))
+            raw_matrix = get_first_present(item, ("matrix", "weights", "filter"))
             if raw_label is None or raw_matrix is None:
                 raise DataSchemaError(
                     f"{context_name}: 필터 항목에 라벨 또는 행렬 필드가 누락되었습니다."
@@ -406,7 +419,7 @@ def resolve_case_components(
     if not isinstance(case_item, dict):
         raise DataSchemaError("테스트 케이스 항목이 JSON 객체(dict) 형식이 아닙니다.")
 
-    case_id = str(case_item.get("id") or case_item.get("name") or "이름없음")
+    case_id = str(get_first_present(case_item, ("id", "name"), default="이름없음"))
 
     # 1. 입력 패턴 행렬 추출 (일반적인 키 이름 지원)
     raw_pattern = None
@@ -541,13 +554,8 @@ def parse_batch_root(raw_root) -> tuple[list, object]:
     if not isinstance(raw_root, dict):
         raise DataSchemaError("JSON 최상위 구조는 리스트 또는 객체여야 합니다.")
 
-    global_filters = raw_root.get("filters") or raw_root.get("filter")
-    cases = (
-        raw_root.get("cases")
-        or raw_root.get("test_cases")
-        or raw_root.get("tests")
-        or raw_root.get("data")
-    )
+    global_filters = get_first_present(raw_root, ("filters", "filter"))
+    cases = get_first_present(raw_root, ("cases", "test_cases", "tests", "data"))
     if not isinstance(cases, list):
         raise DataSchemaError("JSON 루트 객체에 테스트 케이스 리스트('cases')가 없습니다.")
     return cases, global_filters
@@ -556,7 +564,7 @@ def parse_batch_root(raw_root) -> tuple[list, object]:
 def build_display_ids(cases: list) -> list[str]:
     """각 케이스의 출력용 이름(id → name → 'Case-번호' 순)을 만듭니다."""
     return [
-        str(item.get("id") or item.get("name") or f"Case-{idx}")
+        str(get_first_present(item, ("id", "name"), default=f"Case-{idx}"))
         if isinstance(item, dict)
         else f"Case-{idx}"
         for idx, item in enumerate(cases, start=1)
