@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mini NPU 설명 노트</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: 왼쪽 고정 목차 + 오른쪽 6개 목표 카드(질문 → 30초 답변 → 설명 → 근거 → 예상 질문), 좁은 화면에서는 한 열 */
+:root {
+  --bg: #f6f8fb;
+  --surface: #ffffff;
+  --fg: #16202e;
+  --muted: #566476;
+  --line: #d9e0ea;
+  --accent: #2753c7;
+  --accent-soft: #e6ecfb;
+  --cross: #2753c7;
+  --x: #b8590f;
+  --tie: #6b7584;
+  --ok: #1f7a4d;
+  --bad: #b3261e;
+  --code-bg: #eef2f8;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --step--1: 0.875rem;
+  --step-0: 1rem;
+  --step-1: 1.2rem;
+  --step-2: 1.55rem;
+  --step-3: 2.1rem;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f141c; --surface: #161d28; --fg: #e4e9f1; --muted: #9aa6b6; --line: #2a3445;
+    --accent: #7c9cff; --accent-soft: #1d2840; --cross: #7c9cff; --x: #f0a35e; --tie: #9aa3b1;
+    --ok: #5cc28d; --bad: #f2827a; --code-bg: #1c2433; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f141c; --surface: #161d28; --fg: #e4e9f1; --muted: #9aa6b6; --line: #2a3445;
+  --accent: #7c9cff; --accent-soft: #1d2840; --cross: #7c9cff; --x: #f0a35e; --tie: #9aa3b1;
+  --ok: #5cc28d; --bad: #f2827a; --code-bg: #1c2433; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body);
+  font-size: var(--step-0); line-height: 1.7;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 64px;
+}
+h1, h2, h3 { line-height: 1.3; text-wrap: balance; margin: 0; }
+code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
+code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.page { max-width: 1120px; margin: 0 auto; display: grid; gap: 40px; }
+.masthead { display: grid; gap: 12px; max-width: 72ch; }
+.eyebrow { font-family: var(--font-mono); font-size: var(--step--1); letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
+.masthead h1 { font-size: var(--step-3); font-weight: 700; }
+.masthead p { margin: 0; color: var(--muted); }
+.formula { font-family: var(--font-mono); font-size: var(--step-1); color: var(--accent); }
+
+.layout { display: grid; gap: 32px; }
+@media (min-width: 920px) { .layout { grid-template-columns: 220px minmax(0, 1fr); } }
+.toc { display: none; }
+@media (min-width: 920px) {
+  .toc { display: block; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; }
+}
+.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; counter-reset: g; }
+.toc li { counter-increment: g; }
+.toc a { display: grid; grid-template-columns: 1.6em 1fr; gap: 4px; padding: 6px 8px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: var(--step--1); line-height: 1.45; }
+.toc a::before { content: counter(g); font-family: var(--font-mono); color: var(--accent); }
+.toc a:hover { background: var(--accent-soft); color: var(--fg); }
+.toc .toc-title { font-size: var(--step--1); font-weight: 700; margin-bottom: 8px; }
+
+.goals { display: grid; gap: 28px; min-width: 0; }
+.goal { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px clamp(18px, 4vw, 36px); display: grid; gap: 18px; min-width: 0; }
+.goal-head { display: grid; gap: 6px; }
+.goal-no { font-family: var(--font-mono); font-size: var(--step--1); color: var(--accent); letter-spacing: 0.06em; }
+.goal h2 { font-size: var(--step-2); }
+.quote { color: var(--muted); font-size: var(--step--1); margin: 0; }
+.answer { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; border-radius: 0 8px 8px 0; }
+.answer strong { display: block; font-size: var(--step--1); color: var(--accent); letter-spacing: 0.04em; margin-bottom: 2px; }
+.answer p { margin: 0; }
+.goal h3 { font-size: var(--step-0); font-weight: 700; }
+.block { display: grid; gap: 8px; }
+.block p, .block ul, .block ol { margin: 0; max-width: 72ch; }
+.block ul, .block ol { padding-left: 1.2em; display: grid; gap: 4px; }
+.evidence { border: 1px dashed var(--line); border-radius: 8px; padding: 14px 16px; display: grid; gap: 6px; }
+.evidence h3 { font-size: var(--step--1); color: var(--muted); letter-spacing: 0.04em; }
+.evidence ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; font-size: var(--step--1); }
+
+details { border-top: 1px solid var(--line); padding-top: 10px; }
+details + details { margin-top: -8px; }
+summary { cursor: pointer; font-weight: 500; list-style: none; display: grid; grid-template-columns: 1.4em 1fr; }
+summary::-webkit-details-marker { display: none; }
+summary::before { content: "Q"; font-family: var(--font-mono); color: var(--accent); font-weight: 600; }
+details p { margin: 6px 0 0 1.4em; color: var(--muted); max-width: 70ch; }
+
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; font-size: var(--step--1); min-width: 420px; font-variant-numeric: tabular-nums; }
+th, td { border-bottom: 1px solid var(--line); padding: 6px 12px; text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 500; }
+
+/* MAC 실습 */
+.lab { display: grid; gap: 16px; }
+@media (min-width: 640px) { .lab { grid-template-columns: auto minmax(0, 1fr); align-items: start; } }
+.lab-input { display: grid; gap: 8px; justify-items: start; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 44px); gap: 6px; }
+.cell { width: 44px; height: 44px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); font-family: var(--font-mono); font-size: 1rem; cursor: pointer; }
+.cell[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn { border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 6px; padding: 4px 10px; font: inherit; font-size: var(--step--1); cursor: pointer; }
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.lab-out { display: grid; gap: 10px; min-width: 0; }
+.calc { display: grid; gap: 4px; }
+.calc-title { font-size: var(--step--1); font-weight: 700; }
+.calc-title.cross { color: var(--cross); }
+.calc-title.x { color: var(--x); }
+.calc-line { font-family: var(--font-mono); font-size: 0.82rem; color: var(--muted); overflow-wrap: anywhere; }
+.verdict { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; }
+.pill { font-family: var(--font-mono); font-size: var(--step--1); padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor; }
+.pill.cross { color: var(--cross); }
+.pill.x { color: var(--x); }
+.pill.tie { color: var(--tie); }
+.caption { font-size: var(--step--1); color: var(--muted); }
+
+/* epsilon 데모 */
+.fp { font-family: var(--font-mono); font-size: 0.9rem; background: var(--code-bg); border-radius: 8px; padding: 12px 14px; display: grid; gap: 4px; overflow-x: auto; }
+.fp .ok { color: var(--ok); }
+.fp .bad { color: var(--bad); }
+
+/* 그래프 */
+.chart-wrap { overflow-x: auto; }
+.chart { width: 100%; max-width: 620px; height: auto; display: block; }
+.chart .axis { stroke: var(--line); }
+.chart .grid { stroke: var(--line); stroke-dasharray: 2 4; }
+.chart .tick { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.chart .ref { stroke: var(--muted); stroke-dasharray: 5 5; fill: none; }
+.chart .series { stroke: var(--accent); stroke-width: 2; fill: none; }
+.chart .dot { fill: var(--accent); }
+.chart .lbl { fill: var(--fg); font-family: var(--font-mono); font-size: 11px; }
+
+/* 진단 흐름 */
+.flow { display: grid; gap: 8px; counter-reset: s; }
+.flow li { list-style: none; display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; }
+.flow { padding: 0; margin: 0; }
+.tag { font-family: var(--font-mono); font-size: 0.78rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); white-space: nowrap; }
+.tag.schema { color: var(--bad); border-color: currentColor; }
+.tag.logic { color: var(--x); border-color: currentColor; }
+.tag.num { color: var(--accent); border-color: currentColor; }
+
+footer { color: var(--muted); font-size: var(--step--1); max-width: 72ch; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+html { scroll-behavior: smooth; }
+</style>
+<style>body{margin:0}</style>
+</head>
+<body>
+
+<div class="page">
+  <header class="masthead">
+    <span class="eyebrow">AI 올인원 · 미션 3 · Mini NPU Simulator</span>
+    <h1>과제 목표 설명 노트</h1>
+    <p>미션 3의 "과제 목표" 6가지를 발표나 질의응답에서 바로 설명할 수 있게 정리했습니다. 항목마다 30초 답변, 자세한 설명, 이 프로젝트 코드와 측정값으로 든 근거, 예상 질문이 있습니다.</p>
+    <span class="formula">Accumulator ← Accumulator + (A × B)</span>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="과제 목표 목차">
+      <div class="toc-title">과제 목표</div>
+      <ol>
+        <li><a href="#goal-mac">MAC 연산과 AI에서의 중요성</a></li>
+        <li><a href="#goal-score">곱하고 더해 유사도 계산</a></li>
+        <li><a href="#goal-label">키·라벨 규칙과 정규화</a></li>
+        <li><a href="#goal-epsilon">부동소수점 오차와 epsilon</a></li>
+        <li><a href="#goal-complexity">시간 측정과 O(N²)</a></li>
+        <li><a href="#goal-diagnose">실패 원인 3분류 진단</a></li>
+      </ol>
+    </nav>
+
+    <main class="goals">
+
+      <!-- 1 -->
+      <section class="goal" id="goal-mac" aria-labelledby="h-mac">
+        <div class="goal-head">
+          <span class="goal-no">목표 1</span>
+          <h2 id="h-mac">MAC 연산이란 무엇이고, AI에서 왜 중요한가</h2>
+          <p class="quote">원문: MAC(Multiply-Accumulate) 연산이 무엇이고, AI에서 왜 중요한지 설명할 수 있다.</p>
+        </div>
+        <div class="answer">
+          <strong>30초 답변</strong>
+          <p>MAC은 두 값을 곱해서(Multiply) 누적합에 더하는(Accumulate) 연산입니다. 신경망의 뉴런 계산 Y = Σ(W × X) + B가 바로 이 곱하고 더하기의 반복이라, AI 계산량의 대부분이 MAC입니다. 그래서 MAC을 수천 개씩 동시에 처리하는 전용 칩인 NPU가 만들어졌습니다.</p>
+        </div>
+        <div class="block">
+          <h3>자세히</h3>
+          <ul>
+            <li>3×3 필터 하나를 비교하는 데 곱셈 9번이 필요합니다. 25×25면 625번입니다.</li>
+            <li>실제 AI 모델은 수백×수백 크기의 필터를 수천 개 쓰므로, 고화질 이미지 한 장에도 수억 번의 MAC이 필요합니다.</li>
+            <li>CPU는 복잡한 명령을 순서대로 처리하는 데 강하지만, 이렇게 단순한 연산을 엄청나게 많이 반복하는 일에는 느립니다. NPU는 MAC 장치를 많이 두고 병렬로 처리해서 이 문제를 풉니다.</li>
+          </ul>
+        </div>
+        <div class="evidence">
+          <h3>이 프로젝트의 근거</h3>
+          <ul>
+            <li><code>compute_mac()</code>이 <code>acc = 0.0</code>에서 시작해 이중 <code>for</code>문으로 <code>acc += a × b</code>를 반복합니다. NumPy 없이 반복문으로 직접 구현했습니다.</li>
+            <li>누적 변수를 0으로 초기화하지 않으면 이전 계산 값이 섞이므로, 초기화가 MAC의 첫 단계입니다.</li>
+          </ul>
+        </div>
+        <details><summary>MAC이 왜 "곱셈 따로, 덧셈 따로"가 아니라 한 단위로 묶이나요?</summary><p>AI 계산에서는 곱셈 바로 다음에 항상 누적 덧셈이 오기 때문입니다. 하드웨어에서 둘을 한 장치로 묶으면 중간 결과를 따로 저장했다 꺼내는 시간이 줄어 더 빠르고 전력도 덜 씁니다.</p></details>
+        <details><summary>파이썬으로 만든 이 시뮬레이터도 병렬로 계산하나요?</summary><p>아닙니다. 반복문으로 한 칸씩 순서대로 계산합니다. 그래서 크기가 커지면 시간이 N²에 비례해 늘어나고, 이 한계가 바로 NPU가 필요한 이유를 보여 줍니다.</p></details>
+      </section>
+
+      <!-- 2 -->
+      <section class="goal" id="goal-score" aria-labelledby="h-score">
+        <div class="goal-head">
+          <span class="goal-no">목표 2</span>
+          <h2 id="h-score">패턴과 필터를 곱하고 더해 유사도를 구하는 원리</h2>
+          <p class="quote">원문: 입력 패턴과 필터를 곱하고 더해서 유사도(점수)를 계산하는 원리를 설명할 수 있다.</p>
+        </div>
+        <div class="answer">
+          <strong>30초 답변</strong>
+          <p>두 배열을 겹쳐서 같은 위치의 값끼리 곱하고 모두 더합니다. 필터에서 1인 칸에 입력도 1이 있을 때만 점수가 올라가므로, 모양이 많이 겹칠수록 점수가 커집니다. 두 필터의 점수를 비교해 더 큰 쪽으로 판정합니다.</p>
+        </div>
+        <div class="block">
+          <h3>직접 눌러 보기</h3>
+          <p class="caption">칸을 눌러 입력 패턴을 바꾸면 Cross 필터와 X 필터의 MAC 점수가 바로 다시 계산됩니다.</p>
+          <div class="lab">
+            <div class="lab-input">
+              <div class="grid3" id="lab-grid" role="group" aria-label="3×3 입력 패턴"></div>
+              <div class="presets">
+                <button class="btn" type="button" id="preset-cross">십자가</button>
+                <button class="btn" type="button" id="preset-x">X</button>
+                <button class="btn" type="button" id="preset-clear">비우기</button>
+              </div>
+            </div>
+            <div class="lab-out" aria-live="polite">
+              <div class="calc">
+                <span class="calc-title cross">Cross 필터 (0 1 0 / 1 1 1 / 0 1 0)</span>
+                <span class="calc-line" id="calc-cross"></span>
+              </div>
+              <div class="calc">
+                <span class="calc-title x">X 필터 (1 0 1 / 0 1 0 / 1 0 1)</span>
+                <span class="calc-line" id="calc-x"></span>
+              </div>
+              <div class="verdict">판정 <span class="pill" id="lab-verdict"></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="evidence">
+          <h3>이 프로젝트의 근거</h3>
+          <ul>
+            <li>십자가 입력은 Cross 필터 5점, X 필터 1점으로 Cross로 판정됩니다. 미션 원문의 예시와 같은 값입니다.</li>
+            <li><code>classify_pattern()</code>이 두 점수를 계산하고, <code>decide_by_scores()</code>가 epsilon 기준으로 큰 쪽을 고릅니다. 모드 1은 같은 함수로 A / B / 판정 불가를 정합니다.</li>
+            <li>가운데 칸은 두 필터에 모두 1이라, 어떤 입력이든 가운데 칸은 두 점수에 똑같이 더해집니다.</li>
+          </ul>
+        </div>
+        <details><summary>입력이 0과 1이 아닌 실수여도 되나요?</summary><p>됩니다. 점수는 실수(float)로 계산되고, 값이 클수록 그 칸이 점수에 더 크게 기여합니다. 그래서 동점 판정에는 부동소수점 오차를 고려한 비교가 필요해집니다(목표 4).</p></details>
+        <details><summary>두 점수가 정확히 같으면 어떻게 되나요?</summary><p>어느 쪽으로도 판단할 근거가 없으므로 모드 2는 UNDECIDED, 모드 1은 "판정 불가"로 표시합니다.</p></details>
+      </section>
+
+      <!-- 3 -->
+      <section class="goal" id="goal-label" aria-labelledby="h-label">
+        <div class="goal-head">
+          <span class="goal-no">목표 3</span>
+          <h2 id="h-label">data.json의 키·라벨 규칙과 라벨 정규화</h2>
+          <p class="quote">원문: data.json의 "키 규칙/라벨 규칙"을 해석하고, 프로그램 내부에서 라벨을 표준화(정규화)하는 이유를 설명할 수 있다.</p>
+        </div>
+        <div class="answer">
+          <strong>30초 답변</strong>
+          <p>패턴 키 <code>size_{N}_{번호}</code>에서 N을 꺼내 <code>size_N</code> 필터를 고릅니다. 정답은 <code>'+'</code>나 <code>'x'</code>, 필터 이름은 <code>'cross'</code>처럼 표기가 제각각이라, 그대로 문자열 비교하면 같은 뜻인데도 FAIL이 납니다. 그래서 들어오자마자 표준 라벨 Cross, X로 바꾼 뒤 비교합니다.</p>
+        </div>
+        <div class="block">
+          <h3>자세히</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>규칙</th><th>원래 표기</th><th>프로그램 내부</th></tr></thead>
+              <tbody>
+                <tr><td>패턴 키 → 필터 선택</td><td><code>size_13_2</code></td><td><code>size_13</code> 필터</td></tr>
+                <tr><td>정답(expected)</td><td><code>'+'</code></td><td>Cross</td></tr>
+                <tr><td>정답(expected)</td><td><code>'x'</code></td><td>X</td></tr>
+                <tr><td>필터 이름</td><td><code>'cross'</code></td><td>Cross</td></tr>
+                <tr><td>필터 이름</td><td><code>'x'</code></td><td>X</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>정규화는 비교하기 직전 한곳에서만 합니다. 표기를 바꾸는 규칙이 한 함수에 모여 있어야, 새 표기가 생겨도 그 함수만 고치면 됩니다.</p>
+        </div>
+        <div class="evidence">
+          <h3>이 프로젝트의 근거</h3>
+          <ul>
+            <li><code>normalize_label()</code>: 앞뒤 공백을 지우고 소문자로 바꾼 뒤 <code>'+'</code>·<code>'cross'</code> → Cross, <code>'x'</code> → X로 바꿉니다. 모르는 라벨은 데이터/스키마 오류로 알립니다.</li>
+            <li><code>parse_size_from_key()</code>가 키에서 N을 꺼내고, <code>select_global_filters()</code>가 <code>size_N</code> 필터를 고릅니다.</li>
+            <li><code>data.json</code>의 case_01~07은 정답 표기를 <code>'+'</code>, <code>'cross'</code>, <code>'Cross'</code>, <code>'x'</code>, <code>'X'</code>로 섞어 두었지만 모두 PASS입니다.</li>
+          </ul>
+        </div>
+        <details><summary>키의 N과 실제 패턴 크기가 다르면 어떻게 되나요?</summary><p>키의 N으로 필터를 고른 뒤 크기를 비교하므로 크기 불일치로 잡힙니다. <code>data_official_format.json</code>의 <code>size_5_4</code>(키는 5, 입력은 13×13)가 이 경우이며, 그 케이스만 FAIL로 처리하고 프로그램은 계속 실행됩니다.</p></details>
+        <details><summary>정규화를 출력할 때 하면 안 되나요?</summary><p>비교가 먼저 일어나기 때문에 늦습니다. 비교 전에 표준 라벨로 바꿔야 PASS/FAIL이 정확하고, 콘솔 출력도 원문 요구대로 표준 라벨로 통일됩니다.</p></details>
+      </section>
+
+      <!-- 4 -->
+      <section class="goal" id="goal-epsilon" aria-labelledby="h-eps">
+        <div class="goal-head">
+          <span class="goal-no">목표 4</span>
+          <h2 id="h-eps">부동소수점 오차와 epsilon 비교 정책</h2>
+          <p class="quote">원문: 부동소수점 오차가 판정에 어떤 영향을 주는지, 그리고 허용오차(epsilon) 기반 비교 정책이 필요한 이유를 설명할 수 있다.</p>
+        </div>
+        <div class="answer">
+          <strong>30초 답변</strong>
+          <p>컴퓨터는 실수를 2진수로 근사해서 저장하므로 0.1 + 0.2가 정확히 0.3이 되지 않습니다. 이 아주 작은 차이 때문에 사실상 같은 점수가 "다르다"고 판정될 수 있습니다. 그래서 두 점수의 차이가 1e-9보다 작으면 같다고 보는 규칙을 둡니다.</p>
+        </div>
+        <div class="block">
+          <h3>이 페이지에서 계산한 결과</h3>
+          <div class="fp" id="fp-demo" aria-live="polite"></div>
+          <p class="caption">브라우저의 JavaScript도 파이썬과 같은 IEEE 754 배정밀도 실수를 쓰므로 결과가 같습니다.</p>
+        </div>
+        <div class="block">
+          <h3>자세히</h3>
+          <ul>
+            <li><code>==</code>로 비교하면 0.30000000000000004 &gt; 0.3이 되어, 같은 점수인데도 Cross로 판정됩니다.</li>
+            <li><code>abs(a − b) &lt; 1e-9</code>로 비교하면 차이 5.55e-17은 "같음"이 되어 UNDECIDED로 판정됩니다.</li>
+            <li>1e-9는 계산 오차(1e-17 안팎)보다는 훨씬 크고, 실제로 의미 있는 점수 차이보다는 훨씬 작습니다. 예를 들어 0과 1로 된 패턴에서는 점수 차이가 최소 1입니다. 그래서 둘을 가르는 경계로 쓰기 좋습니다.</li>
+          </ul>
+        </div>
+        <div class="evidence">
+          <h3>이 프로젝트의 근거</h3>
+          <ul>
+            <li><code>EPSILON = 1e-9</code> 상수 하나를 모든 비교(<code>decide_by_scores()</code>, 기대 점수 비교)에 씁니다.</li>
+            <li><code>case_08_3x3_tie_fp</code>, <code>size_5_3</code>: 0.1 + 0.2 대 0.3이 UNDECIDED로 PASS.</li>
+            <li><code>case_11_err_epsilon</code>(차이 5e-10), <code>size_5_6</code>(차이 5.55e-17): 동점인데 정답이 Cross로 적혀 있어 수치 비교 오류로 FAIL. 비교 정책을 확인하려고 일부러 넣은 케이스입니다.</li>
+          </ul>
+        </div>
+        <details><summary>epsilon을 더 크게 잡으면 안 되나요?</summary><p>너무 크면 실제로 다른 점수까지 동점으로 처리해 판정을 잃습니다. 값의 크기가 크게 달라지는 데이터라면 상대 오차(두 값 크기에 비례한 허용오차)를 쓰는 방법도 있습니다. 이 미션은 원문 권장값 1e-9를 따랐습니다.</p></details>
+        <details><summary>정수만 쓰면 이런 문제가 없지 않나요?</summary><p>0과 1만 있는 패턴이라면 점수도 정수라 문제가 없습니다. 하지만 원문이 실수 점수를 허용하고, 실제 AI의 가중치도 실수이므로 비교 정책이 필요합니다.</p></details>
+      </section>
+
+      <!-- 5 -->
+      <section class="goal" id="goal-complexity" aria-labelledby="h-cx">
+        <div class="goal-head">
+          <span class="goal-no">목표 5</span>
+          <h2 id="h-cx">크기별 연산 시간 측정과 O(N²)</h2>
+          <p class="quote">원문: 크기별 연산 시간을 측정하고, 패턴 크기 증가에 따른 시간 복잡도 O(N²)를 근거와 함께 설명할 수 있다.</p>
+        </div>
+        <div class="answer">
+          <strong>30초 답변</strong>
+          <p>N×N 행렬의 모든 칸을 한 번씩 곱하고 더하므로 연산 횟수가 정확히 N²입니다. 실제로 측정해 보면 크기가 커질수록 시간이 연산 횟수에 비례해 늘어납니다. 작은 크기에서는 함수 호출 같은 고정 비용 때문에 비례보다 조금 느리게 보입니다.</p>
+        </div>
+        <div class="block">
+          <h3>실제 측정값 (10회 반복 평균, Python 3.14.0, Windows 11)</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>크기</th><th>연산 횟수 N²</th><th>평균 시간 (ms)</th><th>시간 배율</th><th>연산량 배율</th></tr></thead>
+              <tbody>
+                <tr><td>3×3</td><td>9</td><td>0.001190</td><td>1.00x</td><td>1.00x</td></tr>
+                <tr><td>5×5</td><td>25</td><td>0.001910</td><td>1.61x</td><td>2.78x</td></tr>
+                <tr><td>13×13</td><td>169</td><td>0.008240</td><td>6.92x</td><td>18.78x</td></tr>
+                <tr><td>25×25</td><td>625</td><td>0.026770</td><td>22.50x</td><td>69.44x</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="chart-wrap">
+            <svg class="chart" id="cx-chart" viewBox="0 0 620 320" role="img" aria-labelledby="cx-chart-title">
+              <title id="cx-chart-title">연산 횟수(N²)에 따른 평균 시간. 점선은 원점과 25×25 측정점을 잇는 정비례선.</title>
+            </svg>
+          </div>
+          <p class="caption">가로축은 연산 횟수 N², 세로축은 평균 시간입니다. 점선은 시간이 연산 횟수에 정확히 비례할 때의 선입니다. 작은 크기의 점이 점선보다 위에 있는 만큼이 고정 비용입니다.</p>
+        </div>
+        <div class="block">
+          <h3>측정 방법이 중요한 이유</h3>
+          <ul>
+            <li>타이머는 <code>compute_mac()</code> 호출만 감쌉니다. 파일 읽기, 행렬 생성, 화면 출력이 섞이면 연산 시간이 아니라 입출력 시간을 재게 됩니다.</li>
+            <li>한 번 재면 운영체제 사정에 따라 값이 흔들리므로 10회 평균을 씁니다.</li>
+            <li>13×13 → 25×25 구간에서 연산량은 3.70배, 시간은 3.25배로 비율이 가까워집니다. 크기가 클수록 O(N²) 추세가 잘 보입니다.</li>
+          </ul>
+        </div>
+        <div class="evidence">
+          <h3>이 프로젝트의 근거</h3>
+          <ul>
+            <li><code>benchmark_mac_performance()</code>: 행렬은 타이머 밖에서 만들고, <code>time.perf_counter()</code>로 MAC 구간만 10회 잽니다.</li>
+            <li>보너스 실험: 2차원을 1차원 배열로 바꾸면 작은 크기에서 25~66% 빨라졌지만 51×51 이상에서는 차이가 없거나 조금 느렸습니다. 고정 비용은 줄어도 N²번의 곱셈·덧셈은 그대로이기 때문입니다.</li>
+          </ul>
+        </div>
+        <details><summary>N이 2배가 되면 시간은 몇 배가 되나요?</summary><p>연산 횟수가 (2N)² = 4N²이므로 이론적으로 약 4배입니다. 고정 비용 때문에 작은 크기에서는 4배보다 덜 늘어난 것처럼 보입니다.</p></details>
+        <details><summary>측정할 때마다 숫자가 다른데 괜찮나요?</summary><p>정상입니다. 다른 프로그램이나 CPU 상태에 따라 절대값은 달라집니다. 중요한 것은 크기에 따라 늘어나는 비율이며, 이 비율은 반복 측정해도 비슷하게 나옵니다.</p></details>
+      </section>
+
+      <!-- 6 -->
+      <section class="goal" id="goal-diagnose" aria-labelledby="h-dg">
+        <div class="goal-head">
+          <span class="goal-no">목표 6</span>
+          <h2 id="h-dg">실패 원인을 세 가지로 나눠 진단하기</h2>
+          <p class="quote">원문: 실패 케이스가 발생했을 때 원인을 "데이터/스키마 문제 vs 로직 문제 vs 수치 비교 문제"로 분리해 진단하고 개선할 수 있다.</p>
+        </div>
+        <div class="answer">
+          <strong>30초 답변</strong>
+          <p>먼저 계산을 할 수 있는 데이터인지 봅니다. 안 되면 데이터/스키마 문제입니다. 계산은 됐는데 결과가 정답과 다르면, 동점 경계에서 갈린 경우는 수치 비교 문제이고, 그 외는 로직(또는 정답 데이터) 문제입니다. 원인이 다르면 고칠 곳도 다르기 때문에 나눠서 봐야 합니다.</p>
+        </div>
+        <div class="block">
+          <h3>진단 순서</h3>
+          <ol class="flow">
+            <li><span class="tag schema">데이터/스키마</span><span>파일이나 키가 없거나, 행렬이 정사각형이 아니거나, 숫자가 아니거나, 패턴과 필터 크기가 다르면 계산 전에 멈춥니다. <b>고칠 곳:</b> 데이터 파일.</span></li>
+            <li><span class="tag num">수치 비교</span><span>판정이나 정답 중 하나가 UNDECIDED라 동점 경계에서 엇갈렸습니다. <b>고칠 곳:</b> 비교 정책(epsilon)이나 정답의 의도.</span></li>
+            <li><span class="tag logic">로직</span><span>계산도 되고 동점도 아닌데 판정이 정답과 다릅니다. <b>고칠 곳:</b> 판정 코드 또는 정답 라벨. 점수를 보고 어느 쪽이 맞는지 판단합니다.</span></li>
+          </ol>
+        </div>
+        <div class="evidence">
+          <h3>이 프로젝트의 근거</h3>
+          <ul>
+            <li>예외 클래스 세 개로 구분합니다: <code>DataSchemaError</code>, <code>NumericalComparisonError</code>, <code>LogicError</code>. 모두 <code>SimulatorError</code>를 상속하므로 모드 2는 하나만 잡아도 세 가지를 모두 처리합니다.</li>
+            <li>케이스마다 따로 예외를 처리하므로 한 케이스가 실패해도 다음 케이스로 넘어가고, 끝에 실패 원인별 건수와 실패 케이스 목록을 출력합니다.</li>
+            <li>예시: <code>case_09</code>·<code>size_5_4</code>(크기 불일치) → 데이터/스키마, <code>case_10</code>·<code>size_5_5</code>(Cross 패턴에 정답 x) → 로직, <code>case_11</code>·<code>size_5_6</code>(동점인데 정답 Cross) → 수치 비교.</li>
+          </ul>
+        </div>
+        <details><summary>로직 오류로 나왔는데 코드가 맞다면요?</summary><p>그럴 수 있습니다. <code>case_10</code>은 Cross 9점, X 1점으로 판정은 맞고 정답 라벨이 틀린 경우입니다. 출력된 두 점수를 근거로 코드와 정답 중 어느 쪽을 고칠지 판단합니다.</p></details>
+        <details><summary>실패가 0건이면 무엇을 설명하나요?</summary><p>원문은 이 경우에도 이유를 요약하라고 합니다. 라벨 정규화로 표기 차이를 없앴고, epsilon 정책으로 부동소수점 오차를 흡수했으며, 크기 검증으로 잘못된 데이터를 계산 전에 걸러 냈기 때문이라고 설명하면 됩니다.</p></details>
+      </section>
+
+    </main>
+  </div>
+
+  <footer>
+    근거로 든 함수와 수치는 저장소 <code>aiallinone_mission3</code>의 <code>main.py</code>, <code>npu_bonus.py</code>, README "6. 결과 리포트"·"7. 보너스 과제"와 같습니다. 시간 측정값은 실행 환경에 따라 달라집니다.
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var EPSILON = 1e-9;
+  var CROSS = [0, 1, 0, 1, 1, 1, 0, 1, 0];
+  var XF = [1, 0, 1, 0, 1, 0, 1, 0, 1];
+  var state = CROSS.slice();
+  var grid = document.getElementById("lab-grid");
+  var cells = [];
+
+  function macLine(filter) {
+    var parts = [], sum = 0;
+    for (var k = 0; k < 9; k++) {
+      parts.push(state[k] + "×" + filter[k]);
+      sum += state[k] * filter[k];
+    }
+    return { text: parts.join(" + ") + " = " + sum, sum: sum };
+  }
+
+  function render() {
+    for (var k = 0; k < 9; k++) {
+      cells[k].setAttribute("aria-pressed", state[k] ? "true" : "false");
+      cells[k].textContent = state[k];
+    }
+    var c = macLine(CROSS), x = macLine(XF);
+    document.getElementById("calc-cross").textContent = c.text;
+    document.getElementById("calc-x").textContent = x.text;
+    var v = document.getElementById("lab-verdict");
+    var diff = Math.abs(c.sum - x.sum);
+    if (diff < EPSILON) { v.textContent = "UNDECIDED"; v.className = "pill tie"; }
+    else if (c.sum > x.sum) { v.textContent = "Cross"; v.className = "pill cross"; }
+    else { v.textContent = "X"; v.className = "pill x"; }
+  }
+
+  for (var k = 0; k < 9; k++) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "cell";
+    b.id = "lab-cell-" + k;
+    b.setAttribute("aria-label", (Math.floor(k / 3) + 1) + "행 " + (k % 3 + 1) + "열");
+    (function (idx) {
+      b.addEventListener("click", function () { state[idx] = state[idx] ? 0 : 1; render(); });
+    })(k);
+    grid.appendChild(b);
+    cells.push(b);
+  }
+  document.getElementById("preset-cross").addEventListener("click", function () { state = CROSS.slice(); render(); });
+  document.getElementById("preset-x").addEventListener("click", function () { state = XF.slice(); render(); });
+  document.getElementById("preset-clear").addEventListener("click", function () { state = [0, 0, 0, 0, 0, 0, 0, 0, 0]; render(); });
+  render();
+
+  // epsilon 데모: 브라우저에서 실제로 계산한 값
+  var a = 0.1 + 0.2, bb = 0.3, d = Math.abs(a - bb);
+  var fp = document.getElementById("fp-demo");
+  function line(html) { var s = document.createElement("span"); s.innerHTML = html; fp.appendChild(s); }
+  line("0.1 + 0.2 = " + String(a));
+  line("0.3       = " + String(bb));
+  line("0.1 + 0.2 == 0.3  →  <span class=\"bad\">" + (a === bb) + "</span>  (== 비교: Cross로 잘못 판정)");
+  line("|차이| = " + d.toExponential(3) + " &lt; 1e-9  →  <span class=\"ok\">" + (d < EPSILON) + "</span>  (epsilon 비교: UNDECIDED)");
+
+  // O(N²) 그래프
+  var data = [
+    { label: "3×3", ops: 9, ms: 0.001190 },
+    { label: "5×5", ops: 25, ms: 0.001910 },
+    { label: "13×13", ops: 169, ms: 0.008240 },
+    { label: "25×25", ops: 625, ms: 0.026770 }
+  ];
+  var svg = document.getElementById("cx-chart");
+  var NS = "http://www.w3.org/2000/svg";
+  var W = 620, H = 320, L = 70, R = 30, T = 20, B = 50;
+  var xMax = 700, yMax = 0.03;
+  function sx(v) { return L + (v / xMax) * (W - L - R); }
+  function sy(v) { return H - B - (v / yMax) * (H - T - B); }
+  function el(name, attrs, text) {
+    var n = document.createElementNS(NS, name);
+    for (var key in attrs) n.setAttribute(key, attrs[key]);
+    if (text) n.textContent = text;
+    svg.appendChild(n);
+    return n;
+  }
+  [0, 0.01, 0.02, 0.03].forEach(function (t) {
+    el("line", { x1: L, x2: W - R, y1: sy(t), y2: sy(t), "class": t === 0 ? "axis" : "grid" });
+    el("text", { x: L - 8, y: sy(t) + 4, "text-anchor": "end", "class": "tick" }, t.toFixed(2));
+  });
+  [0, 100, 200, 300, 400, 500, 600, 700].forEach(function (t) {
+    el("text", { x: sx(t), y: H - B + 18, "text-anchor": "middle", "class": "tick" }, String(t));
+  });
+  el("line", { x1: L, x2: L, y1: T, y2: H - B, "class": "axis" });
+  el("text", { x: (L + W - R) / 2, y: H - 10, "text-anchor": "middle", "class": "tick" }, "연산 횟수 N²");
+  el("text", { x: 14, y: (T + H - B) / 2, "text-anchor": "middle", "class": "tick", transform: "rotate(-90 14 " + (T + H - B) / 2 + ")" }, "평균 시간 (ms)");
+  var last = data[data.length - 1];
+  var slope = last.ms / last.ops;
+  el("line", { x1: sx(0), y1: sy(0), x2: sx(xMax), y2: sy(slope * xMax), "class": "ref" });
+  el("polyline", { points: data.map(function (p) { return sx(p.ops) + "," + sy(p.ms); }).join(" "), "class": "series" });
+  data.forEach(function (p, i) {
+    el("circle", { cx: sx(p.ops), cy: sy(p.ms), r: 4.5, "class": "dot" });
+    // 3×3·5×5 점은 서로 가까워 라벨을 위로 쌓고, 마지막 점은 오른쪽 끝을 넘지 않게 왼쪽으로 붙입니다.
+    var dy = i === 0 ? -14 : (i === 1 ? -30 : -12);
+    var isLast = i === data.length - 1;
+    el("text", {
+      x: sx(p.ops) + (isLast ? -10 : 8), y: sy(p.ms) + dy,
+      "text-anchor": isLast ? "end" : "start", "class": "lbl"
+    }, p.label + " · " + p.ms.toFixed(4) + "ms");
+  });
+})();
+</script>
+</body>
+</html>

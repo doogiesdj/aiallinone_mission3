@@ -14,6 +14,8 @@ NPU의 핵심 연산 단위인 `Accumulator ← Accumulator + (A × B)`(`out += 
 - **성능 측정**: I/O를 제외한 순수 MAC 연산 시간만 측정해 $O(N^2)$ 복잡도 확인
 - **보너스 과제**: N×N Cross/X 패턴 생성기, 2차원 → 1차원 배열 최적화와 전후 성능 비교
 
+> 📘 **과제 목표 설명 노트**: 미션의 과제 목표 6가지를 30초 답변·근거·예상 질문으로 정리한 학습 자료입니다. [`docs/mission3_goals.html`](docs/mission3_goals.html)을 내려받아 브라우저로 열면 3×3 MAC 실습과 O(N²) 그래프를 직접 볼 수 있습니다.
+
 ---
 
 ## 2. 시작하기
@@ -286,6 +288,8 @@ $env:PYTHONIOENCODING="utf-8"   # PowerShell
 ├── data.json                 # 일괄 판정용 테스트 케이스 11건 (자체 형식, 메뉴 2번 기본 파일)
 ├── data_official_format.json # 미션 공식 형식(filters.size_N / patterns.size_{N}_{idx}) 예시 10건
 ├── npu_bonus.py              # 보너스 과제: 패턴 생성기, 1차원 배열 최적화와 전후 비교
+├── docs/
+│   └── mission3_goals.html   # 과제 목표 설명 노트 (브라우저로 열기)
 ├── README.md                 # 프로젝트 설명
 └── .gitignore
 ```
