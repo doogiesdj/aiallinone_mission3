@@ -59,7 +59,9 @@ $env:PYTHONIOENCODING="utf-8"   # PowerShell
 각 행을 공백(또는 쉼표)으로 구분해 입력합니다. 숫자 개수가 맞지 않거나 숫자가 아니면 안내 후 해당 행을 다시 입력받습니다.
 
 ```text
-[필터 A] 3×3 행렬을 입력하세요
+필터 A/B를 패턴 생성기로 자동 생성할까요? (A=Cross, B=X) [y/N] >      ← Enter: 직접 입력
+
+[필터 A] 3×3 행렬을 입력하세요 (각 행의 숫자 3개를 공백 또는 쉼표로 구분):
   1행 입력 > 0 1
   입력 형식 오류: 각 줄에 3개의 숫자를 공백으로 구분해 입력하세요. (입력된 숫자 2개) 1행을 다시 입력해 주세요.
   1행 입력 > 0 1 0
@@ -154,7 +156,7 @@ $env:PYTHONIOENCODING="utf-8"   # PowerShell
 
 1. **MAC 직접 구현 (`compute_mac`)**: 누적 변수를 `acc = 0.0`으로 초기화한 뒤 이중 `for`문으로 `acc += row_a[j] * row_b[j]`를 수행합니다.
 2. **입력 검증 (`parse_finite_float`, `validate_square_matrix`)**: 정사각 행렬 여부와 숫자 변환을 검사하며, `bool`, `NaN`, `Inf`는 거부합니다.
-3. **Epsilon 비교 (`classify_pattern`)**: `abs(score_cross - score_x) < 1e-9`이면 `UNDECIDED`, 아니면 점수가 큰 쪽으로 판별합니다.
+3. **Epsilon 비교 (`decide_by_scores`)**: 두 점수 차이가 `1e-9` 미만이면 동점, 아니면 점수가 큰 쪽으로 판정합니다. 모드 2(`classify_pattern`)는 Cross / X / `UNDECIDED`, 모드 1은 A / B / `판정 불가`로 같은 함수를 씁니다.
 4. **실패 원인 분리**: 예외 계층 `SimulatorError` 아래 세 가지로 구분합니다.
 
    | 예외 | 분류 | 발생 조건 |
