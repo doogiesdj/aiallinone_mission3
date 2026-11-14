@@ -163,7 +163,7 @@ def normalize_label(label) -> str:
 # ---------------------------------------------------------------------------
 # 행렬 검증 및 MAC(Multiply-Accumulate) 핵심 연산
 # ---------------------------------------------------------------------------
-def validate_square_matrix(matrix, name: str = "행렬", expected_size: int | None = None) -> list[list[float]]:
+def validate_square_matrix(matrix, name: str = "행렬") -> list[list[float]]:
     """
     2차원 정사각 행렬(N×N)인지 검증하고, 모든 원소를 float으로 정규화해 반환합니다.
     행렬 크기를 특정 숫자(3, 5 등)로 고정하지 않고 실제 입력 길이를 기준으로 동적 검증합니다.
@@ -172,11 +172,6 @@ def validate_square_matrix(matrix, name: str = "행렬", expected_size: int | No
         raise DataSchemaError(f"{name}은(는) 비어 있지 않은 2차원 리스트여야 합니다.")
 
     row_count = len(matrix)
-    if expected_size is not None and row_count != expected_size:
-        raise DataSchemaError(
-            f"{name}의 행 개수가 일치하지 않습니다: 기대={expected_size}, 실제={row_count}"
-        )
-
     normalized: list[list[float]] = []
     for row_idx, row in enumerate(matrix):
         if not isinstance(row, list):
@@ -191,9 +186,7 @@ def validate_square_matrix(matrix, name: str = "행렬", expected_size: int | No
             try:
                 parsed_row.append(parse_finite_float(cell))
             except DataSchemaError as exc:
-                raise DataSchemaError(
-                    f"{name} ({row_idx + 1}행 {col_idx + 1}열) 오류: {exc}"
-                ) from exc
+                raise DataSchemaError(f"{name} ({row_idx + 1}행 {col_idx + 1}열) 오류: {exc}") from exc
         normalized.append(parsed_row)
 
     return normalized
@@ -217,9 +210,7 @@ def compute_mac(matrix_a: list[list[float]], matrix_b: list[list[float]]) -> flo
     # 행렬 내 각 행의 열 길이까지 정합성 확인 (직접 호출 시 안전장치)
     for idx in range(size_a):
         if len(matrix_a[idx]) != size_a or len(matrix_b[idx]) != size_a:
-            raise DataSchemaError(
-                f"MAC 연산 대상의 {idx + 1}번째 행 열 개수가 {size_a}와 일치하지 않습니다."
-            )
+            raise DataSchemaError(f"MAC 연산 대상의 {idx + 1}번째 행 열 개수가 {size_a}와 일치하지 않습니다.")
 
     # 누적합 변수 초기화 (필수)
     acc = 0.0
@@ -276,43 +267,29 @@ def read_matrix_from_user(title: str, size: int = 3) -> list[list[float]]:
     - 행/열 수 불일치나 숫자 파싱 실패가 발생하면 오류 원인을 안내하고 재입력을 받습니다.
     """
     print(f"\n[{title}] {size}×{size} 행렬을 입력하세요 (각 행의 숫자 {size}개를 공백 또는 쉼표로 구분):")
+    format_hint = f"입력 형식 오류: 각 줄에 {size}개의 숫자를 공백으로 구분해 입력하세요."
+    rows: list[list[float]] = []
 
-    while True:
-        rows: list[list[float]] = []
-        valid_matrix = True
+    # 각 행은 숫자 개수와 숫자 변환을 모두 통과해야 저장되므로, 완성된 행렬은 항상 size×size입니다.
+    while len(rows) < size:
+        row_no = len(rows) + 1
+        raw_line = input(f"  {row_no}행 입력 > ").strip()
+        if not raw_line:
+            print("  [입력 오류] 빈 줄은 입력할 수 없습니다. 다시 입력해 주세요.")
+            continue
 
-        for r in range(size):
-            while True:
-                raw_line = input(f"  {r + 1}행 입력 > ").strip()
-                if not raw_line:
-                    print("  [입력 오류] 빈 줄은 입력할 수 없습니다. 다시 입력해 주세요.")
-                    continue
+        # 쉼표를 공백으로 치환해 공백/쉼표 혼합 입력도 깔끔하게 분리
+        tokens = raw_line.replace(",", " ").split()
+        if len(tokens) != size:
+            print(f"  {format_hint} (입력된 숫자 {len(tokens)}개) {row_no}행을 다시 입력해 주세요.")
+            continue
 
-                # 쉼표를 공백으로 치환해 공백/쉼표 혼합 입력도 깔끔하게 분리
-                tokens = raw_line.replace(",", " ").split()
-                format_hint = f"입력 형식 오류: 각 줄에 {size}개의 숫자를 공백으로 구분해 입력하세요."
-                if len(tokens) != size:
-                    print(f"  {format_hint} (입력된 숫자 {len(tokens)}개) {r + 1}행을 다시 입력해 주세요.")
-                    continue
-
-                try:
-                    parsed_row = [parse_finite_float(tok) for tok in tokens]
-                except DataSchemaError as exc:
-                    print(f"  {format_hint} ({exc}) {r + 1}행을 다시 입력해 주세요.")
-                    continue
-
-                rows.append(parsed_row)
-                break
-
-        # 전체 행 수 최종 검증 (안전 확인)
         try:
-            validated = validate_square_matrix(rows, name=title, expected_size=size)
+            rows.append([parse_finite_float(tok) for tok in tokens])
         except DataSchemaError as exc:
-            print(f"  [검증 실패] {exc} 행렬 전체를 다시 입력합니다.")
-            valid_matrix = False
+            print(f"  {format_hint} ({exc}) {row_no}행을 다시 입력해 주세요.")
 
-        if valid_matrix:
-            return validated
+    return rows
 
 
 def print_stored_matrix(title: str, matrix: list[list[float]]) -> None:
@@ -372,9 +349,7 @@ def load_json_file(file_path: str):
     except FileNotFoundError as exc:
         raise DataSchemaError(f"파일을 찾을 수 없습니다: '{file_path}'") from exc
     except json.JSONDecodeError as exc:
-        raise DataSchemaError(
-            f"JSON 구문 파싱 실패 ({exc.lineno}행 {exc.colno}열): {exc.msg}"
-        ) from exc
+        raise DataSchemaError(f"JSON 구문 파싱 실패 ({exc.lineno}행 {exc.colno}열): {exc.msg}") from exc
     except OSError as exc:
         raise DataSchemaError(f"파일 읽기 중 OS 오류가 발생했습니다: {exc}") from exc
     else:
@@ -385,43 +360,43 @@ def load_json_file(file_path: str):
             file_obj.close()
 
 
+def filter_label_matrix_pairs(raw_filters, context_name: str) -> list[tuple]:
+    """
+    필터 정의를 (라벨, 행렬) 쌍 목록으로 통일합니다.
+    지원 형식: {"cross": [[...]], "x": [[...]]} 또는 [{"label": "cross", "matrix": [[...]]}, ...]
+    """
+    if isinstance(raw_filters, dict):
+        return list(raw_filters.items())
+    if not isinstance(raw_filters, list):
+        raise DataSchemaError(f"{context_name}: 필터 구조가 딕셔너리 또는 리스트가 아닙니다.")
+
+    pairs: list[tuple] = []
+    for idx, item in enumerate(raw_filters):
+        if not isinstance(item, dict):
+            raise DataSchemaError(f"{context_name}: 필터 리스트의 {idx + 1}번째 항목이 객체가 아닙니다.")
+        raw_label = get_first_present(item, ("label", "name", "type"))
+        raw_matrix = get_first_present(item, ("matrix", "weights", "filter"))
+        if raw_label is None or raw_matrix is None:
+            raise DataSchemaError(f"{context_name}: 필터 항목에 라벨 또는 행렬 필드가 누락되었습니다.")
+        pairs.append((raw_label, raw_matrix))
+    return pairs
+
+
 def extract_filters_from_mapping(raw_filters, context_name: str) -> dict[str, list[list[float]]]:
     """
     필터 딕셔너리(또는 리스트)에서 라벨 정규화 함수를 거쳐 Cross / X 필터 행렬을 추출합니다.
     예: {"cross": [[...]], "x": [[...]]} 또는 {"+": [[...]], "x": [[...]]}
     """
     extracted: dict[str, list[list[float]]] = {}
-
-    if isinstance(raw_filters, dict):
-        for raw_key, raw_matrix in raw_filters.items():
-            norm_key = normalize_label(raw_key)
-            if norm_key not in ("Cross", "X"):
-                raise DataSchemaError(
-                    f"{context_name}: 필터 라벨은 Cross('+'/'cross') 또는 X('x')여야 합니다: {raw_key!r}"
-                )
-            extracted[norm_key] = validate_square_matrix(
-                raw_matrix, name=f"{context_name} [{norm_key} 필터]"
+    for raw_label, raw_matrix in filter_label_matrix_pairs(raw_filters, context_name):
+        norm_key = normalize_label(raw_label)
+        if norm_key not in ("Cross", "X"):
+            raise DataSchemaError(
+                f"{context_name}: 필터 라벨은 Cross('+'/'cross') 또는 X('x')여야 합니다: {raw_label!r}"
             )
-    elif isinstance(raw_filters, list):
-        for idx, item in enumerate(raw_filters):
-            if not isinstance(item, dict):
-                raise DataSchemaError(
-                    f"{context_name}: 필터 리스트의 {idx + 1}번째 항목이 객체가 아닙니다."
-                )
-            raw_label = get_first_present(item, ("label", "name", "type"))
-            raw_matrix = get_first_present(item, ("matrix", "weights", "filter"))
-            if raw_label is None or raw_matrix is None:
-                raise DataSchemaError(
-                    f"{context_name}: 필터 항목에 라벨 또는 행렬 필드가 누락되었습니다."
-                )
-            norm_key = normalize_label(raw_label)
-            if norm_key not in ("Cross", "X"):
-                raise DataSchemaError(f"{context_name}: 잘못된 필터 라벨입니다: {raw_label!r}")
-            extracted[norm_key] = validate_square_matrix(
-                raw_matrix, name=f"{context_name} [{norm_key} 필터]"
-            )
-    else:
-        raise DataSchemaError(f"{context_name}: 필터 구조가 딕셔너리 또는 리스트가 아닙니다.")
+        extracted[norm_key] = validate_square_matrix(
+            raw_matrix, name=f"{context_name} [{norm_key} 필터]"
+        )
 
     if "Cross" not in extracted or "X" not in extracted:
         raise DataSchemaError(f"{context_name}: Cross와 X 필터 2개가 모두 필요합니다.")
@@ -762,20 +737,11 @@ def benchmark_mac_performance(
 
         for _ in range(repeats):
             start_t = time.perf_counter()
-            # 순수 MAC 연산만 수행
-            _ = compute_mac(pattern, filt)
-            end_t = time.perf_counter()
-            elapsed_ms_list.append((end_t - start_t) * 1000.0)
+            compute_mac(pattern, filt)  # 순수 MAC 연산만 측정
+            elapsed_ms_list.append((time.perf_counter() - start_t) * 1000.0)
 
         avg_ms = sum(elapsed_ms_list) / repeats
-        results.append(
-            {
-                "size": size,
-                "ops": size * size,
-                "avg_ms": avg_ms,
-                "repeats": repeats,
-            }
-        )
+        results.append({"size": size, "ops": size * size, "avg_ms": avg_ms, "repeats": repeats})
 
     return results
 
@@ -795,9 +761,7 @@ def print_performance_report(results: list[dict]) -> None:
     for row in results:
         size_str = f"{row['size']} × {row['size']}"
         ratio_str = f"{row['avg_ms'] / base_time:.2f}x" if base_time else "-"
-        print(
-            f"{size_str:<16} | {row['ops']:<14} | {row['avg_ms']:<14.6f} | {ratio_str}"
-        )
+        print(f"{size_str:<16} | {row['ops']:<14} | {row['avg_ms']:<14.6f} | {ratio_str}")
 
 
 # ---------------------------------------------------------------------------
@@ -819,14 +783,10 @@ def main() -> None:
         if choice == "1":
             run_interactive_mode(default_size=3)
         elif choice == "2":
-            custom_path = input(
-                f"JSON 파일 경로 입력 (엔터 시 기본값 '{DEFAULT_DATA_FILE}') > "
-            ).strip()
-            target_path = custom_path if custom_path else DEFAULT_DATA_FILE
-            run_batch_mode(target_path)
+            prompt = f"JSON 파일 경로 입력 (엔터 시 기본값 '{DEFAULT_DATA_FILE}') > "
+            run_batch_mode(input(prompt).strip() or DEFAULT_DATA_FILE)
         elif choice == "3":
-            bench_results = benchmark_mac_performance()
-            print_performance_report(bench_results)
+            print_performance_report(benchmark_mac_performance())
         elif choice == "0":
             print("Mini NPU Simulator를 종료합니다.")
             break
