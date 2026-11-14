@@ -516,18 +516,9 @@ def evaluate_single_case(case_item, global_filters) -> tuple[str, int, str, floa
     return case_id, size_n, predicted, score_cross, score_x
 
 
-def run_batch_mode(file_path: str = DEFAULT_DATA_FILE) -> dict:
-    """
-    모드 2 실행 함수:
-    data.json 파일의 모든 케이스를 일괄 판정합니다.
-    개별 케이스에서 스키마 오류나 크기 불일치가 발생해도 프로그램이 중단되지 않고
-    해당 케이스만 FAIL과 사유를 출력한 뒤 다음 케이스로 진행합니다.
-    """
-    print("\n" + "=" * 60)
-    print(f"모드 2: data.json 일괄 판정 모드 (대상: {file_path})")
-    print("=" * 60)
-
-    summary = {
+def new_batch_summary() -> dict:
+    """모드 2 평가 결과를 집계할 빈 요약 딕셔너리를 생성합니다."""
+    return {
         "total": 0,
         "passed": 0,
         "failed": 0,
@@ -539,66 +530,69 @@ def run_batch_mode(file_path: str = DEFAULT_DATA_FILE) -> dict:
         "measured_sizes": set(),
     }
 
-    try:
-        raw_root = load_json_file(file_path)
-    except DataSchemaError as exc:
-        print(f"[파일 오류] {exc}")
-        return summary
 
-    # 루트 구조 해석: 리스트 형태 또는 {"cases": [...], "filters": ...} 형태 모두 지원
-    global_filters = None
+def parse_batch_root(raw_root) -> tuple[list, object]:
+    """
+    JSON 루트 구조를 해석해 (케이스 리스트, 전역 필터)를 반환합니다.
+    리스트 형태 또는 {"cases": [...], "filters": ...} 형태를 모두 지원합니다.
+    """
     if isinstance(raw_root, list):
-        cases = raw_root
-    elif isinstance(raw_root, dict):
-        global_filters = raw_root.get("filters") or raw_root.get("filter")
-        cases = (
-            raw_root.get("cases")
-            or raw_root.get("test_cases")
-            or raw_root.get("tests")
-            or raw_root.get("data")
-        )
-        if not isinstance(cases, list):
-            print("[데이터/스키마 오류] JSON 루트 객체에 테스트 케이스 리스트('cases')가 없습니다.")
-            return summary
-    else:
-        print("[데이터/스키마 오류] JSON 최상위 구조는 리스트 또는 객체여야 합니다.")
-        return summary
+        return raw_root, None
+    if not isinstance(raw_root, dict):
+        raise DataSchemaError("JSON 최상위 구조는 리스트 또는 객체여야 합니다.")
 
-    summary["total"] = len(cases)
+    global_filters = raw_root.get("filters") or raw_root.get("filter")
+    cases = (
+        raw_root.get("cases")
+        or raw_root.get("test_cases")
+        or raw_root.get("tests")
+        or raw_root.get("data")
+    )
+    if not isinstance(cases, list):
+        raise DataSchemaError("JSON 루트 객체에 테스트 케이스 리스트('cases')가 없습니다.")
+    return cases, global_filters
 
-    display_ids = [
+
+def build_display_ids(cases: list) -> list[str]:
+    """각 케이스의 출력용 이름(id → name → 'Case-번호' 순)을 만듭니다."""
+    return [
         str(item.get("id") or item.get("name") or f"Case-{idx}")
         if isinstance(item, dict)
         else f"Case-{idx}"
         for idx, item in enumerate(cases, start=1)
     ]
-    # 가장 긴 케이스 ID 길이에 맞춰 ID 열 너비를 동적으로 결정 (긴 ID에도 열 정렬 유지)
-    id_width = max((display_width(label) for label in display_ids), default=0)
 
-    for idx, case_item in enumerate(cases, start=1):
-        fallback_id = display_ids[idx - 1]
 
-        # 케이스 단위 예외 격리: 한 케이스가 실패해도 다음 케이스를 계속 평가
-        try:
-            case_id, size_n, predicted, score_cross, score_x = evaluate_single_case(
-                case_item, global_filters
-            )
-        except SimulatorError as exc:
-            summary["failed"] += 1
-            summary["errors_by_category"][exc.category] = (
-                summary["errors_by_category"].get(exc.category, 0) + 1
-            )
-            print(f"[{idx:02d}] {pad_display(fallback_id, id_width)} | FAIL | [{exc.category}] {exc}")
-        else:
-            summary["passed"] += 1
-            summary["measured_sizes"].add(size_n)
-            size_label = f"{size_n}×{size_n}"
-            print(
-                f"[{idx:02d}] {pad_display(case_id, id_width)} | PASS | {size_label:<{SIZE_LABEL_WIDTH}} | "
-                f"판별={predicted:<9} (Cross={score_cross:.4g}, X={score_x:.4g})"
-            )
+def evaluate_and_report_case(
+    idx: int, case_item, global_filters, display_id: str, id_width: int, summary: dict
+) -> None:
+    """
+    단일 케이스를 평가해 PASS/FAIL 한 줄을 출력하고 summary 집계를 갱신합니다.
+    케이스 단위로 예외를 격리하므로 실패해도 다음 케이스 평가가 계속됩니다.
+    """
+    try:
+        case_id, size_n, predicted, score_cross, score_x = evaluate_single_case(
+            case_item, global_filters
+        )
+    except SimulatorError as exc:
+        summary["failed"] += 1
+        summary["errors_by_category"][exc.category] = (
+            summary["errors_by_category"].get(exc.category, 0) + 1
+        )
+        print(f"[{idx:02d}] {pad_display(display_id, id_width)} | FAIL | [{exc.category}] {exc}")
+        return
 
-    # 콘솔 요약 출력
+    summary["passed"] += 1
+    summary["measured_sizes"].add(size_n)
+    size_label = f"{size_n}×{size_n}"
+    print(
+        f"[{idx:02d}] {pad_display(case_id, id_width)} | PASS | {size_label:<{SIZE_LABEL_WIDTH}} | "
+        f"판별={predicted:<9} (Cross={score_cross:.4g}, X={score_x:.4g})"
+    )
+
+
+def print_batch_summary(summary: dict) -> None:
+    """모드 2 평가 요약(총계, PASS/FAIL 수, 실패 원인 분류)을 출력합니다."""
     print("-" * 60)
     print(
         f"평가 요약: 총 {summary['total']}건 | "
@@ -609,6 +603,43 @@ def run_batch_mode(file_path: str = DEFAULT_DATA_FILE) -> dict:
         for cat_name, count in summary["errors_by_category"].items():
             print(f"  - {cat_name}: {count}건")
 
+
+def run_batch_mode(file_path: str = DEFAULT_DATA_FILE) -> dict:
+    """
+    모드 2 실행 함수:
+    data.json 파일의 모든 케이스를 일괄 판정합니다.
+    개별 케이스에서 스키마 오류나 크기 불일치가 발생해도 프로그램이 중단되지 않고
+    해당 케이스만 FAIL과 사유를 출력한 뒤 다음 케이스로 진행합니다.
+    """
+    print("\n" + "=" * 60)
+    print(f"모드 2: data.json 일괄 판정 모드 (대상: {file_path})")
+    print("=" * 60)
+
+    summary = new_batch_summary()
+
+    try:
+        raw_root = load_json_file(file_path)
+    except DataSchemaError as exc:
+        print(f"[파일 오류] {exc}")
+        return summary
+
+    try:
+        cases, global_filters = parse_batch_root(raw_root)
+    except DataSchemaError as exc:
+        print(f"[{exc.category}] {exc}")
+        return summary
+
+    summary["total"] = len(cases)
+    display_ids = build_display_ids(cases)
+    # 가장 긴 케이스 이름의 화면 폭에 맞춰 이름 열 너비를 결정 (한글은 2칸)
+    id_width = max((display_width(label) for label in display_ids), default=0)
+
+    for idx, case_item in enumerate(cases, start=1):
+        evaluate_and_report_case(
+            idx, case_item, global_filters, display_ids[idx - 1], id_width, summary
+        )
+
+    print_batch_summary(summary)
     return summary
 
 
