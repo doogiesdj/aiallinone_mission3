@@ -17,6 +17,8 @@ Mini NPU Simulator (미션 3)
 import json
 import time
 
+import npu_bonus  # 보너스 과제(패턴 생성기, 1차원 최적화) 모듈 — 같은 폴더의 npu_bonus.py
+
 # ---------------------------------------------------------------------------
 # 전역 상수 정의
 # ---------------------------------------------------------------------------
@@ -309,8 +311,9 @@ def run_interactive_mode(default_size: int = 3) -> None:
     print(f"모드 1: 사용자 입력 모드 ({default_size}×{default_size} 필터 A, B + 패턴)")
     print("=" * 60)
 
-    filter_a = read_matrix_from_user("필터 A", size=default_size)
-    filter_b = read_matrix_from_user("필터 B", size=default_size)
+    # 보너스: 패턴 생성기로 필터 A/B를 자동 생성할 수 있으며, 거절하면 직접 입력합니다.
+    filter_a, filter_b = npu_bonus.ask_generated_filters(default_size) or (
+        read_matrix_from_user("필터 A", default_size), read_matrix_from_user("필터 B", default_size))
     print("\n--- 필터 저장 확인 ---")
     print_stored_matrix("필터 A", filter_a)
     print_stored_matrix("필터 B", filter_b)
@@ -709,15 +712,10 @@ def run_batch_mode(file_path: str = DEFAULT_DATA_FILE) -> dict:
 # ---------------------------------------------------------------------------
 def build_synthetic_matrices(size: int) -> tuple[list[list[float]], list[list[float]]]:
     """
-    성능 측정용 N×N 입력 행렬과 필터 행렬을 사전에 생성합니다.
+    성능 측정용 N×N 입력(X 패턴)과 필터(Cross 패턴)를 보너스 패턴 생성기로 미리 만듭니다.
     (시간 측정 구간에 행렬 생성 비용이 섞이지 않도록 타이머 밖에서 호출합니다.)
     """
-    pattern = [[float((i + j) % 2) for j in range(size)] for i in range(size)]
-    cross_filter = [
-        [1.0 if (i == size // 2 or j == size // 2) else 0.0 for j in range(size)]
-        for i in range(size)
-    ]
-    return pattern, cross_filter
+    return npu_bonus.generate_x_pattern(size), npu_bonus.generate_cross_pattern(size)
 
 
 def benchmark_mac_performance(
@@ -776,6 +774,7 @@ def main() -> None:
         print("1. 모드 1: 사용자 입력 모드 (3×3 필터 2개 + 패턴 판별)")
         print("2. 모드 2: data.json 일괄 판정 모드 (5×5, 13×13, 25×25 등)")
         print("3. 성능 분석: 크기별 순수 MAC 연산 10회 평균 시간(ms) 및 N² 측정")
+        print("4. 보너스 과제: 패턴 생성기 / 최적화 전후 비교(2차원 vs 1차원)")
         print("0. 종료")
 
         choice = input("실행할 번호를 선택하세요 > ").strip()
@@ -787,11 +786,13 @@ def main() -> None:
             run_batch_mode(input(prompt).strip() or DEFAULT_DATA_FILE)
         elif choice == "3":
             print_performance_report(benchmark_mac_performance())
+        elif choice == "4":
+            npu_bonus.run_bonus_menu(compute_mac)
         elif choice == "0":
             print("Mini NPU Simulator를 종료합니다.")
             break
         else:
-            print("[안내] 올바른 메뉴 번호(0, 1, 2, 3)를 입력해 주세요.")
+            print("[안내] 올바른 메뉴 번호(0, 1, 2, 3, 4)를 입력해 주세요.")
 
 
 if __name__ == "__main__":
